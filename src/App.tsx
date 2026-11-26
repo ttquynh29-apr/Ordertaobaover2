@@ -1,3 +1,4 @@
+```react
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import {
@@ -34,12 +35,10 @@ import {
   Edit3,
   CheckSquare,
   SlidersHorizontal,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Box
 } from 'lucide-react';
 
-// ============================================================================
-// 1. CẤU HÌNH FIREBASE FIRESTORE & KHO ẢNH CLOUDINARY (25GB MIỄN PHÍ)
-// ============================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyAusVgOjx6G5-VptO47ED3hoVZKCBJrkIA",
   authDomain: "ordertaobao-pro.firebaseapp.com",
@@ -50,7 +49,6 @@ const firebaseConfig = {
   measurementId: "G-1EH1CW30DY"
 };
 
-// Kho ảnh Cloudinary 25GB miễn phí đã kết nối sẵn cho ordertaobao.pro
 const CLOUDINARY_CLOUD_NAME = "ci4srmte";
 const CLOUDINARY_UPLOAD_PRESET = "pncfjhcw";
 
@@ -71,59 +69,23 @@ const INITIAL_DATA = {
   ctvs: [
     {
       id: 'ctv1',
-      username: 'lananh',
+      username: 'moon',
       password: '123',
-      name: 'Lan Anh',
+      name: 'MOON',
       bankName: 'MB Bank',
-      bankAccount: '0987654321',
-      bankHolder: 'NGUYEN THI LAN ANH',
+      bankAccount: '',
+      bankHolder: '',
       active: true
     }
   ],
-  orders: [
-    {
-      id: 'ord_sample_1',
-      code: '2601',
-      createdAt: new Date().toISOString().slice(0, 10),
-      ctvId: 'ctv1',
-      ctvName: 'Lan Anh',
-      customerName: 'Trần Minh Thư',
-      customerPhone: '0912345678',
-      customerAddress: '128 Nguyễn Trãi, Phường Bến Thành, Quận 1, TP.HCM',
-      productName: 'Set Áo Khoác Tweed Tiểu Thư Phối Nơ (Kem - Size S)',
-      sizeColor: 'https://item.taobao.com/item.htm?id=74928194021',
-      quantity: 1,
-      salePriceVnd: 350000,
-      depositVnd: 150000,
-      codVnd: 200000,
-      commissionVnd: 35000,
-      commissionPaid: false,
-      commissionBillImage: '',
-      costCny: 58,
-      cnTracking: 'SF1682940123CN',
-      batchId: '',
-      vnShippingCostVnd: 20000,
-      postpaidWeight: false,
-      spxTracking: '',
-      shippingPayer: 'customer',
-      shopShipFeeVnd: 0,
-      status: 'arrived_vn',
-      completedAt: null,
-      note: 'Khách dặn kiểm tra kỹ cúc áo trước khi gửi',
-      productImages: [],
-      depositBillImage: ''
-    }
-  ],
+  orders: [],
   taobaoOrders: [],
   batches: [],
   shipments: []
 };
 
-// ============================================================================
-// 2. BỘ MÃ HÓA MÃ VẠCH CHUẨN CÔNG NGHIỆP CODE 128B
-// ============================================================================
 const CODE128_PATTERNS = [
-  "212222","222122","22221","121223","121322","131222","122213","122312","132212","221213",
+  "212222","222122","222221","121223","121322","131222","122213","122312","132212","221213",
   "221312","231212","112232","122132","122231","113222","123122","123221","223211","221132",
   "221231","213212","223112","312131","311222","321122","321221","312212","322112","322211",
   "212123","212321","232121","111323","131123","131321","112313","132113","132311","211313",
@@ -136,14 +98,56 @@ const CODE128_PATTERNS = [
   "114131","311141","411131","211412","211214","211232","2331112"
 ];
 
-const encodeCode128B = (text) => {
-  const cleanText = String(text || 'SPXVN06829104').replace(/[^\x20-\x7E]/g, '');
-  const codes = [104];
-  let checksum = 104;
-  for (let i = 0; i < cleanText.length; i++) {
-    const val = cleanText.charCodeAt(i) - 32;
-    codes.push(val);
-    checksum += val * (i + 1);
+const encodeCode128Auto = (text) => {
+  const cleanText = String(text || 'SPXVN06829104').trim().replace(/[^\x20-\x7E]/g, '');
+  if (!cleanText) return '';
+
+  const isDigit = (ch) => ch >= '0' && ch <= '9';
+  const countDigitsFrom = (str, idx) => {
+    let count = 0;
+    while (idx + count < str.length && isDigit(str[idx + count])) {
+      count++;
+    }
+    return count;
+  };
+
+  const codes = [];
+  let i = 0;
+  let mode = 'B';
+
+  if (countDigitsFrom(cleanText, 0) >= 4) {
+    codes.push(105);
+    mode = 'C';
+  } else {
+    codes.push(104);
+    mode = 'B';
+  }
+
+  while (i < cleanText.length) {
+    const digitsAhead = countDigitsFrom(cleanText, i);
+    if (mode === 'C') {
+      if (digitsAhead >= 2) {
+        const pairVal = parseInt(cleanText.slice(i, i + 2), 10);
+        codes.push(pairVal);
+        i += 2;
+      } else {
+        codes.push(100);
+        mode = 'B';
+      }
+    } else {
+      if (digitsAhead >= 4) {
+        codes.push(99);
+        mode = 'C';
+      } else {
+        codes.push(cleanText.charCodeAt(i) - 32);
+        i += 1;
+      }
+    }
+  }
+
+  let checksum = codes[0];
+  for (let idx = 1; idx < codes.length; idx++) {
+    checksum += codes[idx] * idx;
   }
   codes.push(checksum % 103);
   codes.push(106);
@@ -153,41 +157,40 @@ const encodeCode128B = (text) => {
 
 const BarcodeCode128 = ({ value = 'SPXVN06829104' }) => {
   const { modules, totalWidth } = useMemo(() => {
-    const pattern = encodeCode128B(value);
+    const pattern = encodeCode128Auto(value);
     const rects = [];
-    let x = 14;
+    const quietZone = 24;
+    let x = quietZone;
     for (let i = 0; i < pattern.length; i++) {
-      const w = parseInt(pattern[i], 10) * 1.5;
+      const w = parseInt(pattern[i], 10) * 2;
       if (i % 2 === 0) {
         rects.push({ x, w });
       }
       x += w;
     }
-    return { modules: rects, totalWidth: x + 14 };
+    return { modules: rects, totalWidth: x + quietZone };
   }, [value]);
 
   return (
-    <div className="flex flex-col items-center bg-white p-2 border border-gray-300 rounded-lg">
+    <div className="flex flex-col items-center bg-white px-2 py-1.5 border border-gray-300 rounded-lg w-full">
       <svg
-        viewBox={`0 0 ${totalWidth} 52`}
-        className="w-full max-w-[230px] h-12"
+        viewBox={`0 0 ${totalWidth} 72`}
+        className="w-full h-16"
+        preserveAspectRatio="none"
         shapeRendering="crispEdges"
       >
-        <rect x="0" y="0" width={totalWidth} height="52" fill="#FFFFFF" />
+        <rect x="0" y="0" width={totalWidth} height="72" fill="#FFFFFF" />
         {modules.map((m, idx) => (
-          <rect key={idx} x={m.x} y="2" width={m.w} height="48" fill="#000000" />
+          <rect key={idx} x={m.x} y="2" width={m.w} height="68" fill="#000000" />
         ))}
       </svg>
-      <span className="text-[11px] font-mono font-bold tracking-widest text-gray-900 mt-1 notranslate" translate="no">
+      <span className="text-xs font-mono font-black tracking-widest text-black mt-1 notranslate" translate="no">
         {value}
       </span>
     </div>
   );
 };
 
-// ============================================================================
-// 3. TIỆN ÍCH XỬ LÝ ẢNH (CLOUDINARY 25GB + DỌN ẢNH SAU 7 NGÀY ĐÃ TRẢ/HỦY)
-// ============================================================================
 const uploadImageSmart = async (file, maxWidth = 800, quality = 0.78) => {
   if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_UPLOAD_PRESET) {
     try {
@@ -280,6 +283,7 @@ const purgeExpiredOrderImages = (ordersList) => {
     const hasAnyImage =
       (Array.isArray(ord.productImages) && ord.productImages.length > 0) ||
       Boolean(ord.depositBillImage) ||
+      Boolean(ord.extraPaymentBillImage) ||
       Boolean(ord.commissionBillImage);
 
     if (now - doneTime >= SEVEN_DAYS_MS && hasAnyImage) {
@@ -289,6 +293,7 @@ const purgeExpiredOrderImages = (ordersList) => {
         completedAt: doneTime,
         productImages: [],
         depositBillImage: '',
+        extraPaymentBillImage: '',
         commissionBillImage: ''
       };
     }
@@ -308,6 +313,9 @@ const optimizeEntirePayload = async (dataObj) => {
       const bill = ord.depositBillImage
         ? await recompressBase64(ord.depositBillImage, 260, 0.35)
         : '';
+      const extraBill = ord.extraPaymentBillImage
+        ? await recompressBase64(ord.extraPaymentBillImage, 260, 0.35)
+        : '';
       const commBill = ord.commissionBillImage
         ? await recompressBase64(ord.commissionBillImage, 260, 0.35)
         : '';
@@ -315,6 +323,7 @@ const optimizeEntirePayload = async (dataObj) => {
         ...ord,
         productImages: imgs,
         depositBillImage: bill,
+        extraPaymentBillImage: extraBill,
         commissionBillImage: commBill
       };
     })
@@ -339,7 +348,6 @@ const formatOrderQuantityBadge = (productName, quantity) => {
   return `x${qty}`;
 };
 
-// Hàm kiểm tra đơn thuộc CTV (khớp cả ID lẫn tên CTV để không bao giờ bị lệch giữa các thiết bị)
 const isOrderOwnedByCtv = (order, ctvObj) => {
   if (!order || !ctvObj) return false;
   if (order.ctvId && ctvObj.id && order.ctvId === ctvObj.id) return true;
@@ -371,9 +379,6 @@ const ORDER_STATUSES = [
   { id: 'cancelled', label: 'Hủy / Hoàn', color: 'bg-red-100 text-red-700 border-red-300', group: 'done' }
 ];
 
-// ============================================================================
-// 4. COMPONENT CHÍNH
-// ============================================================================
 export default function App() {
   const [dbReady, setDbReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState('connecting');
@@ -404,12 +409,20 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState('orders');
   const [orderSubTab, setOrderSubTab] = useState('active');
+  const [activeStatusFilter, setActiveStatusFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCtv, setFilterCtv] = useState('all');
 
   const [previewImage, setPreviewImage] = useState(null);
   const [copiedText, setCopiedText] = useState('');
+
   const [shippingModalOrder, setShippingModalOrder] = useState(null);
+  const [shipModalPhone, setShipModalPhone] = useState('');
+  const [shipModalAddress, setShipModalAddress] = useState('');
+  const [shipModalExtraPaid, setShipModalExtraPaid] = useState('');
+  const [shipModalExtraBill, setShipModalExtraBill] = useState('');
+  const [isUploadingExtraBill, setIsUploadingExtraBill] = useState(false);
+
   const [editOrderModal, setEditOrderModal] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [deleteCtvTarget, setDeleteCtvTarget] = useState(null);
@@ -504,7 +517,8 @@ export default function App() {
           c.id === currentUser.id ||
           (c.username &&
             currentUser.username &&
-            c.username.toLowerCase() === currentUser.username.toLowerCase())
+            c.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+          (c.name && currentUser.name && c.name.toLowerCase() === currentUser.name.toLowerCase())
       );
       if (me) {
         setBankForm({
@@ -533,7 +547,7 @@ export default function App() {
 
           const nextState = {
             exchangeRate: data.exchangeRate || 3550,
-            ctvs: Array.isArray(data.ctvs) ? data.ctvs : INITIAL_DATA.ctvs,
+            ctvs: Array.isArray(data.ctvs) && data.ctvs.length > 0 ? data.ctvs : INITIAL_DATA.ctvs,
             orders: cleaned,
             taobaoOrders: Array.isArray(data.taobaoOrders) ? data.taobaoOrders : [],
             batches: Array.isArray(data.batches) ? data.batches : [],
@@ -838,11 +852,13 @@ export default function App() {
       spxTracking: '',
       shippingPayer: 'customer',
       shopShipFeeVnd: 0,
+      packedDone: false,
       status: 'pending',
       completedAt: null,
       note: newOrder.note.trim(),
       productImages: newOrder.productImages || [],
-      depositBillImage: newOrder.depositBillImage || ''
+      depositBillImage: newOrder.depositBillImage || '',
+      extraPaymentBillImage: ''
     };
 
     const ok = await updateAppData({
@@ -889,6 +905,57 @@ export default function App() {
     updateAppData({ ...appData, orders: updatedOrders });
   };
 
+  const openShippingModal = (order) => {
+    setShippingModalOrder(order);
+    setShipModalPhone(order.customerPhone || '');
+    setShipModalAddress(order.customerAddress || '');
+    setShipModalExtraPaid('');
+    setShipModalExtraBill(order.extraPaymentBillImage || '');
+  };
+
+  const handleUploadExtraPaymentBill = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingExtraBill(true);
+    try {
+      const uploadedUrl = await uploadImageSmart(file);
+      setShipModalExtraBill(uploadedUrl);
+    } finally {
+      setIsUploadingExtraBill(false);
+    }
+  };
+
+  const handleConfirmShippingReport = () => {
+    if (!shippingModalOrder) return;
+    const extraAmt = Math.max(0, Number(shipModalExtraPaid) || 0);
+    const prevDeposit = Number(shippingModalOrder.depositVnd) || 0;
+    const salePrice = Number(shippingModalOrder.salePriceVnd) || 0;
+    const nextDeposit = prevDeposit + extraAmt;
+    const nextCod = Math.max(0, salePrice - nextDeposit);
+
+    const extraNoteParts = ['CTV báo giao ngay'];
+    if (extraAmt > 0) {
+      extraNoteParts.push(`Khách bank thêm ${formatVND(extraAmt)}`);
+    }
+    const updatedNote = (shippingModalOrder.note ? shippingModalOrder.note + ' | ' : '') + extraNoteParts.join(' - ');
+
+    updateOrderField(shippingModalOrder.id, {
+      customerPhone: shipModalPhone.trim(),
+      customerAddress: shipModalAddress.trim(),
+      depositVnd: nextDeposit,
+      codVnd: nextCod,
+      extraPaymentBillImage: shipModalExtraBill || shippingModalOrder.extraPaymentBillImage || '',
+      note: updatedNote
+    });
+
+    setShippingModalOrder(null);
+    showToast(
+      extraAmt > 0
+        ? `Đã báo giao & cộng thêm ${formatVND(extraAmt)} khách bank!`
+        : 'Đã cập nhật địa chỉ & báo giao hàng cho Admin!'
+    );
+  };
+
   const confirmDeleteOrder = () => {
     if (!deleteConfirmId) return;
     updateAppData({
@@ -905,31 +972,45 @@ export default function App() {
     return appData.orders.filter((o) => isOrderOwnedByCtv(o, currentUser));
   }, [appData.orders, currentUser]);
 
-  const activeCount = useMemo(
-    () =>
-      roleOrders.filter((o) =>
-        ['pending', 'ordered_cn', 'shipping_cn', 'arrived_vn'].includes(o.status)
-      ).length,
-    [roleOrders]
-  );
+  const ctvFilteredOrders = useMemo(() => {
+    if (currentUser?.role === 'admin' && filterCtv !== 'all') {
+      const targetCtvObj = appData.ctvs.find((c) => c.id === filterCtv);
+      if (targetCtvObj) {
+        return roleOrders.filter((o) => isOrderOwnedByCtv(o, targetCtvObj));
+      }
+    }
+    return roleOrders;
+  }, [roleOrders, currentUser, filterCtv, appData.ctvs]);
+
+  const activeStatusCounts = useMemo(() => {
+    const counts = { all: 0, pending: 0, ordered_cn: 0, shipping_cn: 0, arrived_vn: 0 };
+    ctvFilteredOrders.forEach((o) => {
+      if (counts[o.status] !== undefined) {
+        counts[o.status]++;
+        counts.all++;
+      }
+    });
+    return counts;
+  }, [ctvFilteredOrders]);
+
+  const activeCount = activeStatusCounts.all;
 
   const adjustCount = useMemo(
-    () => roleOrders.filter((o) => ['keep', 'lost_reorder'].includes(o.status)).length,
-    [roleOrders]
+    () => ctvFilteredOrders.filter((o) => ['keep', 'lost_reorder'].includes(o.status)).length,
+    [ctvFilteredOrders]
   );
 
   const doneCount = useMemo(
-    () => roleOrders.filter((o) => ['shipped_done', 'cancelled'].includes(o.status)).length,
-    [roleOrders]
+    () => ctvFilteredOrders.filter((o) => ['shipped_done', 'cancelled'].includes(o.status)).length,
+    [ctvFilteredOrders]
   );
 
   const visibleOrders = useMemo(() => {
-    return roleOrders.filter((o) => {
+    return ctvFilteredOrders.filter((o) => {
       const stObj = ORDER_STATUSES.find((s) => s.id === o.status) || ORDER_STATUSES[0];
       if (stObj.group !== orderSubTab) return false;
-      if (currentUser?.role === 'admin' && filterCtv !== 'all') {
-        const targetCtvObj = appData.ctvs.find((c) => c.id === filterCtv);
-        if (targetCtvObj && !isOrderOwnedByCtv(o, targetCtvObj)) return false;
+      if (orderSubTab === 'active' && activeStatusFilter !== 'all' && o.status !== activeStatusFilter) {
+        return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -938,7 +1019,7 @@ export default function App() {
       }
       return true;
     });
-  }, [roleOrders, orderSubTab, currentUser, filterCtv, appData.ctvs, searchQuery]);
+  }, [ctvFilteredOrders, orderSubTab, activeStatusFilter, searchQuery]);
 
   const availableCnTrackings = useMemo(() => {
     const map = {};
@@ -1087,11 +1168,37 @@ export default function App() {
     return appData.orders.filter((o) => ['arrived_vn', 'keep'].includes(o.status));
   }, [appData.orders]);
 
+  // Danh sách các đơn đã tạo MVĐ trả khách nhưng đang chờ gói hàng & bàn giao
+  const pendingPackingOrders = useMemo(() => {
+    return appData.orders.filter(
+      (o) =>
+        Boolean(o.spxTracking) &&
+        !o.packedDone &&
+        !['shipped_done', 'cancelled'].includes(o.status)
+    );
+  }, [appData.orders]);
+
   const calculatedPrintCod = useMemo(() => {
     const base = Number(customCodVnd) || 0;
     const fee = Number(shipFeeInput) || 0;
     return shippingPayer === 'customer' ? base + fee : Math.max(0, base - fee);
   }, [customCodVnd, shipFeeInput, shippingPayer]);
+
+  const buildLabelPreviewFromOrder = (order, overrideSpx, overrideCod, overrideFee, overridePayer) => {
+    return {
+      orderId: order.id,
+      spxCode: overrideSpx || order.spxTracking,
+      receiverName: order.customerName,
+      receiverPhone: order.customerPhone,
+      receiverAddress: order.customerAddress || 'Nhận tại cửa hàng / Địa chỉ đã xác nhận',
+      itemsSummary: `#${order.code} - ${order.productName} ${formatOrderQuantityBadge(order.productName, order.quantity)}`,
+      note: order.note,
+      codAmount: overrideCod !== undefined ? overrideCod : Number(order.codVnd) || 0,
+      shipFee: overrideFee !== undefined ? overrideFee : Number(order.shopShipFeeVnd) || 0,
+      shippingPayer: overridePayer || order.shippingPayer || 'customer',
+      postpaidWeight: Boolean(order.postpaidWeight)
+    };
+  };
 
   const handleGenerateA6Label = (e) => {
     e.preventDefault();
@@ -1106,18 +1213,9 @@ export default function App() {
       `SPXVN06${Math.floor(100000 + Math.random() * 900000)}`;
     const shipFee = Number(shipFeeInput) || 0;
 
-    setActiveLabelPreview({
-      spxCode,
-      receiverName: target.customerName,
-      receiverPhone: target.customerPhone,
-      receiverAddress: target.customerAddress || 'Nhận tại cửa hàng / Địa chỉ đã xác nhận',
-      itemsSummary: `#${target.code} - ${target.productName} ${formatOrderQuantityBadge(target.productName, target.quantity)}`,
-      note: target.note,
-      codAmount: calculatedPrintCod,
-      shipFee,
-      shippingPayer,
-      postpaidWeight: Boolean(target.postpaidWeight)
-    });
+    setActiveLabelPreview(
+      buildLabelPreviewFromOrder(target, spxCode, calculatedPrintCod, shipFee, shippingPayer)
+    );
 
     const updatedOrders = appData.orders.map((o) =>
       o.id === target.id
@@ -1126,8 +1224,7 @@ export default function App() {
             spxTracking: spxCode,
             shippingPayer,
             shopShipFeeVnd: shippingPayer === 'shop' ? shipFee : 0,
-            status: 'shipped_done',
-            completedAt: o.completedAt || Date.now()
+            packedDone: false
           }
         : o
     );
@@ -1136,13 +1233,26 @@ export default function App() {
       ...appData,
       orders: updatedOrders
     });
-    showToast(`Đã tạo phiếu vận đơn A6 (${spxCode}) & chuyển đơn sang Đã trả hàng!`);
+
+    setSelectedPrintOrderId('');
+    setVnDomesticTrackingInput('');
+    showToast(`Đã tạo tem A6 (${spxCode})! Hãy in tem và tick "Đã gói xong" bên dưới khi đóng hàng xong.`);
+  };
+
+  const handleConfirmPackedAndHandover = (order) => {
+    updateOrderField(order.id, {
+      packedDone: true,
+      status: 'shipped_done',
+      completedAt: Date.now()
+    });
+    showToast(`Đã xác nhận gói xong & bàn giao đơn #${order.code}!`);
   };
 
   const handleCreateCtv = (e) => {
     e.preventDefault();
     const uname = newCtvForm.username.trim().toLowerCase();
-    if (!uname || !newCtvForm.name.trim() || !newCtvForm.password.trim()) return;
+    const name = newCtvForm.name.trim();
+    if (!uname || !name || !newCtvForm.password.trim()) return;
 
     if (appData.ctvs.some((c) => c.username.toLowerCase() === uname)) {
       showToast('Tên đăng nhập CTV đã tồn tại!');
@@ -1151,7 +1261,7 @@ export default function App() {
 
     const created = {
       id: 'ctv_' + Date.now(),
-      name: newCtvForm.name.trim(),
+      name,
       username: uname,
       password: newCtvForm.password.trim(),
       bankName: '',
@@ -1212,7 +1322,8 @@ export default function App() {
       c.id === currentUser.id ||
       (c.username &&
         currentUser.username &&
-        c.username.toLowerCase() === currentUser.username.toLowerCase())
+        c.username.toLowerCase() === currentUser.username.toLowerCase()) ||
+      (c.name && currentUser.name && c.name.toLowerCase() === currentUser.name.toLowerCase())
         ? {
             ...c,
             bankName: bankForm.bankName.trim(),
@@ -1483,13 +1594,13 @@ export default function App() {
                       </div>
                     </div>
                     <div className="bg-white p-2 rounded-xl border border-emerald-200">
-                      <div className="text-[10px] text-emerald-700">Đã cọc</div>
+                      <div className="text-[10px] text-emerald-700">Đã thanh toán</div>
                       <div className="font-extrabold text-emerald-700">
                         {formatVND(matchedOrder.depositVnd)}
                       </div>
                     </div>
                     <div className="bg-white p-2 rounded-xl border border-orange-200">
-                      <div className="text-[10px] text-orange-700">Thanh toán</div>
+                      <div className="text-[10px] text-orange-700">Còn lại</div>
                       <div className="font-extrabold text-orange-600">
                         {formatVND(matchedOrder.codVnd)}
                       </div>
@@ -2111,70 +2222,101 @@ export default function App() {
             </div>
 
             <div className="bg-white rounded-3xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-                  <button
-                    onClick={() => setOrderSubTab('active')}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
-                      orderSubTab === 'active'
-                        ? 'bg-orange-600 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Clock className="w-3.5 h-3.5" /> Đang chờ ({activeCount})
-                  </button>
-
-                  <button
-                    onClick={() => setOrderSubTab('adjust')}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
-                      orderSubTab === 'adjust'
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <SlidersHorizontal className="w-3.5 h-3.5" /> Điều chỉnh ({adjustCount})
-                  </button>
-
-                  <button
-                    onClick={() => setOrderSubTab('done')}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
-                      orderSubTab === 'done'
-                        ? 'bg-gray-800 text-white shadow-sm'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Hoàn thành ({doneCount})
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {currentUser.role === 'admin' && (
-                    <select
-                      value={filterCtv}
-                      onChange={(e) => setFilterCtv(e.target.value)}
-                      className="px-3 py-2 rounded-xl border border-gray-300 text-xs font-semibold bg-white notranslate"
-                      translate="no"
+              <div className="p-4 border-b border-gray-200 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                    <button
+                      onClick={() => setOrderSubTab('active')}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
+                        orderSubTab === 'active'
+                          ? 'bg-orange-600 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
                     >
-                      <option value="all">Tất cả CTV</option>
-                      {appData.ctvs.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                      <Clock className="w-3.5 h-3.5" /> Đang chờ ({activeCount})
+                    </button>
 
-                  <div className="relative flex-1 sm:w-60">
-                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Tìm mã đơn, tên khách, SP, MVĐ..."
-                      className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-300 text-xs"
-                    />
+                    <button
+                      onClick={() => setOrderSubTab('adjust')}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
+                        orderSubTab === 'adjust'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <SlidersHorizontal className="w-3.5 h-3.5" /> Điều chỉnh ({adjustCount})
+                    </button>
+
+                    <button
+                      onClick={() => setOrderSubTab('done')}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition ${
+                        orderSubTab === 'done'
+                          ? 'bg-gray-800 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Hoàn thành ({doneCount})
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {currentUser.role === 'admin' && (
+                      <select
+                        value={filterCtv}
+                        onChange={(e) => setFilterCtv(e.target.value)}
+                        className="px-3 py-2 rounded-xl border border-gray-300 text-xs font-semibold bg-white notranslate"
+                        translate="no"
+                      >
+                        <option value="all">Tất cả CTV</option>
+                        {appData.ctvs.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    <div className="relative flex-1 sm:w-60">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Tìm mã đơn, tên khách, SP, MVĐ..."
+                        className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-300 text-xs"
+                      />
+                    </div>
                   </div>
                 </div>
+
+                {orderSubTab === 'active' && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-2 border-t border-gray-100">
+                    <span className="text-[11px] font-bold text-gray-400 mr-1 shrink-0">Lọc nhanh:</span>
+                    {[
+                      { id: 'all', label: `Tất cả (${activeStatusCounts.all})`, activeStyle: 'bg-gray-800 text-white border-gray-800' },
+                      { id: 'pending', label: `Chờ đặt hàng (${activeStatusCounts.pending})`, activeStyle: 'bg-gray-700 text-white border-gray-700' },
+                      { id: 'ordered_cn', label: `Đã đặt hàng (${activeStatusCounts.ordered_cn})`, activeStyle: 'bg-blue-600 text-white border-blue-600' },
+                      { id: 'shipping_cn', label: `Xuất kho (${activeStatusCounts.shipping_cn})`, activeStyle: 'bg-orange-600 text-white border-orange-600' },
+                      { id: 'arrived_vn', label: `Có sẵn (${activeStatusCounts.arrived_vn})`, activeStyle: 'bg-emerald-600 text-white border-emerald-600' }
+                    ].map((pill) => {
+                      const isSelected = activeStatusFilter === pill.id;
+                      return (
+                        <button
+                          key={pill.id}
+                          type="button"
+                          onClick={() => setActiveStatusFilter(pill.id)}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold border whitespace-nowrap transition ${
+                            isSelected
+                              ? pill.activeStyle
+                              : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {pill.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="divide-y divide-gray-100">
@@ -2210,10 +2352,19 @@ export default function App() {
                               {order.depositBillImage && (
                                 <img
                                   src={order.depositBillImage}
-                                  alt="Bill"
+                                  alt="Bill cọc"
                                   onClick={() => setPreviewImage(order.depositBillImage)}
-                                  className="w-14 h-14 rounded-xl object-cover border border-emerald-300 cursor-pointer hover:opacity-90"
-                                  title="Xem ảnh bill"
+                                  className="w-14 h-14 rounded-xl object-cover border-2 border-emerald-400 cursor-pointer hover:opacity-90"
+                                  title="Xem ảnh bill cọc"
+                                />
+                              )}
+                              {order.extraPaymentBillImage && (
+                                <img
+                                  src={order.extraPaymentBillImage}
+                                  alt="Bill trả thêm"
+                                  onClick={() => setPreviewImage(order.extraPaymentBillImage)}
+                                  className="w-14 h-14 rounded-xl object-cover border-2 border-blue-400 cursor-pointer hover:opacity-90"
+                                  title="Xem ảnh bill khách trả thêm"
                                 />
                               )}
                             </div>
@@ -2234,6 +2385,11 @@ export default function App() {
                                 {order.postpaidWeight && (
                                   <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
                                     Phí cân trả sau
+                                  </span>
+                                )}
+                                {order.spxTracking && !order.packedDone && order.status !== 'shipped_done' && (
+                                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300">
+                                    Đã tạo MVĐ • Chờ gói
                                   </span>
                                 )}
                                 <span className="text-[11px] text-gray-400">{order.createdAt}</span>
@@ -2303,7 +2459,7 @@ export default function App() {
                                     Báo Keep
                                   </button>
                                   <button
-                                    onClick={() => setShippingModalOrder(order)}
+                                    onClick={() => openShippingModal(order)}
                                     className="px-2.5 py-1 rounded-lg bg-orange-600 text-white text-[11px] font-bold hover:bg-orange-700"
                                   >
                                     Báo Giao Hàng
@@ -2578,212 +2734,296 @@ export default function App() {
         )}
 
         {activeTab === 'shipping' && currentUser.role === 'admin' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5 space-y-4">
-              <h2 className="font-bold text-sm sm:text-base text-gray-900">
-                1. Tạo Đơn Trả Hàng & Cấu Hình Vận Đơn
-              </h2>
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5 space-y-4">
+                <h2 className="font-bold text-sm sm:text-base text-gray-900">
+                  1. Tạo Mã Vận Đơn & In Tem Khổ A6
+                </h2>
 
-              <form onSubmit={handleGenerateA6Label} className="space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
-                    Chọn đơn hàng cần trả *
-                  </label>
-                  <select
-                    required
-                    value={selectedPrintOrderId}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setSelectedPrintOrderId(id);
-                      const found = appData.orders.find((o) => o.id === id);
-                      if (found) setCustomCodVnd(String(found.codVnd));
-                    }}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 bg-white text-xs font-semibold notranslate"
-                    translate="no"
-                  >
-                    <option value="">-- Chọn đơn hàng sẵn sàng trả --</option>
-                    {readyToShipOrders.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        #{o.code} — {o.customerName} — {o.productName} (Còn lại: {formatVND(o.codVnd)})
-                        {o.postpaidWeight ? ' [Phí cân trả sau]' : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
-                    Mã vận đơn nội địa VN (Tự sinh nếu để trống)
-                  </label>
-                  <input
-                    type="text"
-                    value={vnDomesticTrackingInput}
-                    onChange={(e) => setVnDomesticTrackingInput(e.target.value)}
-                    placeholder="VD: SPXVN06829104..."
-                    className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-mono notranslate"
-                    translate="no"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <form onSubmit={handleGenerateA6Label} className="space-y-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-orange-700 uppercase mb-1">
-                      Tùy chỉnh tiền thu COD gốc (VNĐ)
+                    <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                      Chọn đơn hàng cần trả *
                     </label>
-                    <input
-                      type="number"
-                      value={customCodVnd}
-                      onChange={(e) => setCustomCodVnd(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-orange-300 bg-orange-50/40 text-xs font-bold text-orange-800"
-                    />
+                    <select
+                      required
+                      value={selectedPrintOrderId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedPrintOrderId(id);
+                        const found = appData.orders.find((o) => o.id === id);
+                        if (found) {
+                          setCustomCodVnd(String(found.codVnd));
+                          setVnDomesticTrackingInput(found.spxTracking || '');
+                        }
+                      }}
+                      className="w-full px-3 py-2.5 rounded-xl border border-gray-300 bg-white text-xs font-semibold notranslate"
+                      translate="no"
+                    >
+                      <option value="">-- Chọn đơn hàng sẵn sàng trả --</option>
+                      {readyToShipOrders.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          #{o.code} — {o.customerName} — {o.productName} (Còn lại: {formatVND(o.codVnd)})
+                          {o.spxTracking ? ` [Đã có MVĐ: ${o.spxTracking}]` : ''}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
-                      Phí ship nội địa (VNĐ)
+                      Mã vận đơn nội địa VN (Tự sinh nếu để trống)
                     </label>
                     <input
-                      type="number"
-                      value={shipFeeInput}
-                      onChange={(e) => setShipFeeInput(e.target.value)}
-                      placeholder="VD: 22000"
-                      className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-bold"
+                      type="text"
+                      value={vnDomesticTrackingInput}
+                      onChange={(e) => setVnDomesticTrackingInput(e.target.value)}
+                      placeholder="VD: SPXVN06829104..."
+                      className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-mono notranslate"
+                      translate="no"
                     />
                   </div>
-                </div>
 
-                <div className="p-3 rounded-2xl bg-gray-50 border border-gray-200 space-y-2">
-                  <label className="block text-[11px] font-bold text-gray-700 uppercase">
-                    Hình thức thanh toán phí ship:
-                  </label>
-                  <div className="flex flex-wrap gap-4 text-xs">
-                    <label className="flex items-center gap-1.5 cursor-pointer font-semibold">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-orange-700 uppercase mb-1">
+                        Tùy chỉnh tiền thu COD gốc (VNĐ)
+                      </label>
                       <input
-                        type="radio"
-                        name="payer"
-                        checked={shippingPayer === 'customer'}
-                        onChange={() => setShippingPayer('customer')}
+                        type="number"
+                        value={customCodVnd}
+                        onChange={(e) => setCustomCodVnd(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-orange-300 bg-orange-50/40 text-xs font-bold text-orange-800"
                       />
-                      <span>Khách trả ship (COD + Phí ship)</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-red-700">
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                        Phí ship nội địa (VNĐ)
+                      </label>
                       <input
-                        type="radio"
-                        name="payer"
-                        checked={shippingPayer === 'shop'}
-                        onChange={() => setShippingPayer('shop')}
+                        type="number"
+                        value={shipFeeInput}
+                        onChange={(e) => setShipFeeInput(e.target.value)}
+                        placeholder="VD: 22000"
+                        className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-bold"
                       />
-                      <span>Shop trả ship (Trừ phí ship ra)</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-gray-50 border border-gray-200 space-y-2">
+                    <label className="block text-[11px] font-bold text-gray-700 uppercase">
+                      Hình thức thanh toán phí ship:
                     </label>
+                    <div className="flex flex-wrap gap-4 text-xs">
+                      <label className="flex items-center gap-1.5 cursor-pointer font-semibold">
+                        <input
+                          type="radio"
+                          name="payer"
+                          checked={shippingPayer === 'customer'}
+                          onChange={() => setShippingPayer('customer')}
+                        />
+                        <span>Khách trả ship (COD + Phí ship)</span>
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer font-semibold text-red-700">
+                        <input
+                          type="radio"
+                          name="payer"
+                          checked={shippingPayer === 'shop'}
+                          onChange={() => setShippingPayer('shop')}
+                        />
+                        <span>Shop trả ship (Trừ phí ship ra)</span>
+                      </label>
+                    </div>
+                    <div className="pt-1 text-xs font-bold text-indigo-700">
+                      Tổng thu hộ in trên tem: {formatVND(calculatedPrintCod)}
+                    </div>
                   </div>
-                  <div className="pt-1 text-xs font-bold text-indigo-700">
-                    Tổng thu hộ in trên tem: {formatVND(calculatedPrintCod)}
-                  </div>
-                </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow flex items-center justify-center gap-2"
-                >
-                  <Printer className="w-4 h-4" /> Tạo Phiếu Vận Đơn Khổ A6
-                </button>
-              </form>
-            </div>
-
-            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5 flex flex-col items-center">
-              <div className="w-full flex items-center justify-between mb-3">
-                <h2 className="font-bold text-sm text-gray-900">
-                  2. Phiếu Vận Đơn Khổ A6 (Lưu PDF)
-                </h2>
-                {activeLabelPreview && (
                   <button
-                    onClick={() => window.print()}
-                    className="px-3.5 py-2 rounded-xl bg-gray-900 hover:bg-black text-white text-xs font-bold flex items-center gap-1.5 shadow"
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow flex items-center justify-center gap-2"
                   >
-                    <Printer className="w-3.5 h-3.5" /> Tải / In File PDF
+                    <Printer className="w-4 h-4" /> Tạo & Lưu MVĐ A6 (Chuyển sang Chờ gói)
                   </button>
-                )}
+                </form>
               </div>
 
-              {activeLabelPreview ? (
-                <div
-                  id="printable-a6-label"
-                  className="w-full max-w-[360px] border-2 border-gray-900 rounded-2xl p-4 bg-white space-y-3 shadow-md text-gray-900"
-                >
-                  <div className="flex items-center justify-between border-b-2 border-gray-900 pb-2.5 gap-2">
-                    <div>
-                      <div className="font-black text-base tracking-tight">EXPRESS A6</div>
-                      <div className="text-xs font-bold text-orange-600 notranslate" translate="no">
-                        Serenade Order
+              <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5 flex flex-col items-center">
+                <div className="w-full flex items-center justify-between mb-3">
+                  <h2 className="font-bold text-sm text-gray-900">
+                    2. Phiếu Vận Đơn Khổ A6 (Lưu PDF)
+                  </h2>
+                  {activeLabelPreview && (
+                    <button
+                      onClick={() => window.print()}
+                      className="px-3.5 py-2 rounded-xl bg-gray-900 hover:bg-black text-white text-xs font-bold flex items-center gap-1.5 shadow"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Tải / In File PDF
+                    </button>
+                  )}
+                </div>
+
+                {activeLabelPreview ? (
+                  <div
+                    id="printable-a6-label"
+                    className="w-full max-w-[360px] border-2 border-gray-900 rounded-2xl p-4 bg-white space-y-3 shadow-md text-gray-900"
+                  >
+                    <div className="flex flex-col border-b-2 border-gray-900 pb-2.5 gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="font-black text-base tracking-tight">EXPRESS A6</div>
+                        <div className="text-xs font-bold text-orange-600 notranslate" translate="no">
+                          Serenade Order
+                        </div>
                       </div>
+                      <BarcodeCode128 value={activeLabelPreview.spxCode} />
                     </div>
-                    <BarcodeCode128 value={activeLabelPreview.spxCode} />
-                  </div>
 
-                  <div className="text-xs border-b border-dashed border-gray-400 pb-2">
-                    <span className="font-bold text-gray-500 uppercase">Người gửi: </span>
-                    <strong className="notranslate" translate="no">Serenade Order</strong>
-                  </div>
+                    <div className="text-xs border-b border-dashed border-gray-400 pb-2">
+                      <span className="font-bold text-gray-500 uppercase">Người gửi: </span>
+                      <strong className="notranslate" translate="no">Serenade Order</strong>
+                    </div>
 
-                  <div className="border-b-2 border-gray-900 pb-2.5 space-y-1">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase">
-                      Người nhận hàng:
-                    </div>
-                    <div className="font-extrabold text-sm notranslate" translate="no">
-                      {activeLabelPreview.receiverName} — {activeLabelPreview.receiverPhone}
-                    </div>
-                    <div className="text-xs leading-relaxed">
-                      {activeLabelPreview.receiverAddress}
-                    </div>
-                  </div>
-
-                  <div className="border-b border-gray-300 pb-2.5 space-y-1">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase">
-                      Thông tin sản phẩm:
-                    </div>
-                    <div className="text-xs font-semibold whitespace-pre-line notranslate" translate="no">
-                      {activeLabelPreview.itemsSummary}
-                    </div>
-                    {activeLabelPreview.postpaidWeight && (
-                      <div className="text-[11px] font-bold text-amber-800">
-                        * Đơn phí cân trả sau
-                      </div>
-                    )}
-                    {activeLabelPreview.note && (
-                      <div className="text-[11px] italic text-gray-600">
-                        Ghi chú: {activeLabelPreview.note}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    <div>
+                    <div className="border-b-2 border-gray-900 pb-2.5 space-y-1">
                       <div className="text-[10px] font-bold text-gray-500 uppercase">
-                        Tiền thu hộ (COD):
+                        Người nhận hàng:
                       </div>
-                      <div className="text-xl font-black text-gray-900">
-                        {formatVND(activeLabelPreview.codAmount)}
+                      <div className="font-extrabold text-sm notranslate" translate="no">
+                        {activeLabelPreview.receiverName} — {activeLabelPreview.receiverPhone}
                       </div>
-                      {activeLabelPreview.shipFee > 0 && (
-                        <div className="text-[10px] text-gray-500">
-                          ({activeLabelPreview.shippingPayer === 'customer'
-                            ? `Đã cộng ${formatVND(activeLabelPreview.shipFee)} phí ship`
-                            : `Đã trừ ${formatVND(activeLabelPreview.shipFee)} phí ship`})
+                      <div className="text-xs leading-relaxed">
+                        {activeLabelPreview.receiverAddress}
+                      </div>
+                    </div>
+
+                    <div className="border-b border-gray-300 pb-2.5 space-y-1">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase">
+                        Thông tin sản phẩm:
+                      </div>
+                      <div className="text-xs font-semibold whitespace-pre-line notranslate" translate="no">
+                        {activeLabelPreview.itemsSummary}
+                      </div>
+                      {activeLabelPreview.postpaidWeight && (
+                        <div className="text-[11px] font-bold text-amber-800">
+                          * Đơn phí cân trả sau
+                        </div>
+                      )}
+                      {activeLabelPreview.note && (
+                        <div className="text-[11px] italic text-gray-600">
+                          Ghi chú: {activeLabelPreview.note}
                         </div>
                       )}
                     </div>
-                    <div className="px-2.5 py-1 rounded-lg border-2 border-gray-900 text-[10px] font-black uppercase">
-                      {activeLabelPreview.shippingPayer === 'shop'
-                        ? 'SHOP TRẢ SHIP'
-                        : 'KHÁCH TRẢ SHIP'}
+
+                    <div className="flex items-center justify-between pt-1">
+                      <div>
+                        <div className="text-[10px] font-bold text-gray-500 uppercase">
+                          Tiền thu hộ (COD):
+                        </div>
+                        <div className="text-xl font-black text-gray-900">
+                          {formatVND(activeLabelPreview.codAmount)}
+                        </div>
+                        {activeLabelPreview.shipFee > 0 && (
+                          <div className="text-[10px] text-gray-500">
+                            ({activeLabelPreview.shippingPayer === 'customer'
+                              ? `Đã cộng ${formatVND(activeLabelPreview.shipFee)} phí ship`
+                              : `Đã trừ ${formatVND(activeLabelPreview.shipFee)} phí ship`})
+                          </div>
+                        )}
+                      </div>
+                      <div className="px-2.5 py-1 rounded-lg border-2 border-gray-900 text-[10px] font-black uppercase">
+                        {activeLabelPreview.shippingPayer === 'shop'
+                          ? 'SHOP TRẢ SHIP'
+                          : 'KHÁCH TRẢ SHIP'}
+                      </div>
                     </div>
                   </div>
+                ) : (
+                  <div className="w-full h-72 border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center text-xs text-gray-400 text-center p-4">
+                    Chọn đơn hàng và bấm "Tạo & Lưu MVĐ A6" để hiển thị tem có mã vạch Code 128 chuẩn quét.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Danh sách kiểm đếm gói hàng sau khi in tem */}
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2 bg-indigo-50/40">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+                    <Box className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-gray-900">
+                      3. Danh Sách Chờ Gói Hàng & Bàn Giao ({pendingPackingOrders.length} đơn)
+                    </h3>
+                    <p className="text-[11px] text-gray-500">
+                      Sau khi in tem và dán lên gói hàng xong, tick <strong>"Đã gói & Bàn giao"</strong> để chuyển đơn sang Hoàn thành.
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                <div className="w-full h-72 border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center text-xs text-gray-400 text-center p-4">
-                  Chọn đơn hàng và bấm "Tạo Phiếu Vận Đơn Khổ A6" để hiển thị tem có mã vạch Code 128B chuẩn quét.
-                </div>
-              )}
+              </div>
+
+              <div className="divide-y divide-gray-100">
+                {pendingPackingOrders.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-gray-400">
+                    Tất cả đơn có mã vận đơn đều đã được gói hàng xong!
+                  </div>
+                ) : (
+                  pendingPackingOrders.map((ord) => (
+                    <div
+                      key={ord.id}
+                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-gray-50 transition"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-md bg-gray-900 text-white font-mono font-bold text-xs notranslate" translate="no">
+                            #{ord.code}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-mono font-bold text-xs notranslate" translate="no">
+                            MVĐ: {ord.spxTracking}
+                          </span>
+                          <span className="font-bold text-xs text-gray-900 notranslate" translate="no">
+                            {ord.customerName} — {ord.customerPhone}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-700 whitespace-pre-line notranslate" translate="no">
+                          {ord.productName}{' '}
+                          <span className="text-orange-600 font-bold">
+                            {formatOrderQuantityBadge(ord.productName, ord.quantity)}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-gray-500">
+                          Địa chỉ: {ord.customerAddress || 'Chưa cập nhật'} • COD thu hộ:{' '}
+                          <strong className="text-orange-600">{formatVND(ord.codVnd)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveLabelPreview(buildLabelPreviewFromOrder(ord));
+                            setTimeout(() => window.print(), 150);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 font-bold text-xs flex items-center gap-1.5"
+                        >
+                          <Printer className="w-3.5 h-3.5 text-indigo-600" /> In lại tem A6
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmPackedAndHandover(ord)}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+                        >
+                          <CheckSquare className="w-4 h-4" /> Đã gói & Bàn giao
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -3180,73 +3420,141 @@ export default function App() {
         )}
       </main>
 
-      {shippingModalOrder && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b pb-3">
-              <h3 className="font-bold text-base text-gray-900">
-                Báo Giao Hàng — #{shippingModalOrder.code}
-              </h3>
-              <button
-                onClick={() => setShippingModalOrder(null)}
-                className="p-1 text-gray-400 hover:text-gray-700"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">
-                  Số điện thoại nhận hàng:
-                </label>
-                <input
-                  type="tel"
-                  defaultValue={shippingModalOrder.customerPhone}
-                  id="modal_ship_phone"
-                  className="w-full px-3 py-2 rounded-xl border border-gray-300"
-                />
+      {shippingModalOrder && (() => {
+        const currentRemaining = Number(shippingModalOrder.codVnd) || 0;
+        const extraAmt = Math.max(0, Number(shipModalExtraPaid) || 0);
+        const newRemaining = Math.max(0, currentRemaining - extraAmt);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl my-8">
+              <div className="flex items-center justify-between border-b pb-3">
+                <h3 className="font-bold text-base text-gray-900">
+                  Báo Giao Hàng — #{shippingModalOrder.code}
+                </h3>
+                <button
+                  onClick={() => setShippingModalOrder(null)}
+                  className="p-1 text-gray-400 hover:text-gray-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">
-                  Địa chỉ nhận hàng chi tiết:
-                </label>
-                <textarea
-                  defaultValue={shippingModalOrder.customerAddress}
-                  id="modal_ship_addr"
-                  rows={3}
-                  className="w-full px-3 py-2 rounded-xl border border-gray-300"
-                />
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">
+                    Số điện thoại nhận hàng:
+                  </label>
+                  <input
+                    type="tel"
+                    value={shipModalPhone}
+                    onChange={(e) => setShipModalPhone(e.target.value)}
+                    placeholder="Nhập SĐT khách hàng..."
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">
+                    Địa chỉ nhận hàng chi tiết:
+                  </label>
+                  <textarea
+                    value={shipModalAddress}
+                    onChange={(e) => setShipModalAddress(e.target.value)}
+                    placeholder="Nhập địa chỉ nhận hàng..."
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                  />
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-blue-50/70 border border-blue-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-blue-900 uppercase text-[11px]">
+                      Khách chuyển khoản thêm (Nếu có)
+                    </span>
+                    <span className="text-[11px] font-bold text-gray-600">
+                      Còn thiếu: <strong className="text-orange-600">{formatVND(currentRemaining)}</strong>
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Khách trả thêm (VNĐ):
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        value={shipModalExtraPaid}
+                        onChange={(e) => setShipModalExtraPaid(e.target.value)}
+                        placeholder="VD: 150000"
+                        className="w-full px-3 py-2 rounded-xl border border-blue-300 bg-white font-bold text-blue-900"
+                      />
+                      {currentRemaining > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShipModalExtraPaid(String(currentRemaining))}
+                          className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] whitespace-nowrap shrink-0"
+                        >
+                          Bank đủ {formatVND(currentRemaining)}
+                        </button>
+                      )}
+                    </div>
+                    {extraAmt > 0 && (
+                      <div className="mt-1.5 text-[11px] font-bold text-emerald-700">
+                        Còn lại thu COD sau khi trừ: {formatVND(newRemaining)}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Upload ảnh bill khách trả thêm:
+                    </label>
+                    <label className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-blue-300 rounded-2xl cursor-pointer bg-white hover:bg-blue-50/50 transition overflow-hidden">
+                      {isUploadingExtraBill ? (
+                        <span className="text-[11px] font-bold text-blue-600">Đang tải ảnh bill...</span>
+                      ) : shipModalExtraBill ? (
+                        <img
+                          src={shipModalExtraBill}
+                          alt="Bill trả thêm"
+                          className="h-full w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center text-blue-500 text-[11px]">
+                          <Upload className="w-4 h-4 mb-1" />
+                          <span className="font-semibold">Chọn ảnh bill khách bank thêm</span>
+                        </div>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleUploadExtraPaymentBill}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShippingModalOrder(null)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold"
-              >
-                Hủy
-              </button>
-              <button
-                onClick={() => {
-                  const phoneEl = document.getElementById('modal_ship_phone');
-                  const addrEl = document.getElementById('modal_ship_addr');
-                  const phone = phoneEl ? phoneEl.value : '';
-                  const addr = addrEl ? addrEl.value : '';
-                  updateOrderField(shippingModalOrder.id, {
-                    customerPhone: phone,
-                    customerAddress: addr,
-                    note: (shippingModalOrder.note ? shippingModalOrder.note + ' | ' : '') + 'CTV báo giao ngay'
-                  });
-                  setShippingModalOrder(null);
-                  showToast('Đã cập nhật địa chỉ & báo giao hàng cho Admin!');
-                }}
-                className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs"
-              >
-                Xác Nhận Báo Giao
-              </button>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShippingModalOrder(null)}
+                  className="px-4 py-2 rounded-xl border text-xs font-bold"
+                >
+                  Hủy
+                </button>
+                <button
+                  disabled={isUploadingExtraBill}
+                  onClick={handleConfirmShippingReport}
+                  className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-bold text-xs shadow"
+                >
+                  Xác Nhận Báo Giao
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {editOrderModal && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
@@ -3356,7 +3664,7 @@ export default function App() {
                 />
               </div>
               <div>
-                <label className="block font-bold text-gray-700 mb-1">Khách đã cọc (VNĐ)</label>
+                <label className="block font-bold text-gray-700 mb-1">Khách đã cọc / thanh toán (VNĐ)</label>
                 <input
                   type="number"
                   value={editOrderModal.depositVnd}
@@ -3855,3 +4163,4 @@ export default function App() {
     </div>
   );
 }
+```
