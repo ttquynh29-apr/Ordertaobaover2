@@ -261,7 +261,6 @@ const recompressBase64 = (base64Str, maxWidth = 280, quality = 0.35) => {
   });
 };
 
-// Tự động dọn sạch ảnh các đơn "Đã trả hàng" (shipped_done) hoặc "Hủy / Hoàn" (cancelled) quá 7 ngày
 const purgeExpiredOrderImages = (ordersList) => {
   const now = Date.now();
   let purgedCount = 0;
@@ -331,6 +330,16 @@ const formatVND = (num) => {
   return n.toLocaleString('vi-VN') + ' ₫';
 };
 
+// Hiển thị nhãn số lượng rõ ràng: nếu nhiều món đánh số dòng thì ghi "(Tổng N món)", tránh gây hiểu nhầm ở món cuối
+const formatOrderQuantityBadge = (productName, quantity) => {
+  const qty = Number(quantity) || 1;
+  const isMultiLineItems = String(productName || '').includes('\n');
+  if (isMultiLineItems && qty > 1) {
+    return `(Tổng ${qty} món)`;
+  }
+  return `x${qty}`;
+};
+
 const ORDER_STATUSES = [
   { id: 'pending', label: 'Chờ đặt hàng', color: 'bg-gray-100 text-gray-700 border-gray-300', group: 'active' },
   { id: 'ordered_cn', label: 'Đã đặt hàng', color: 'bg-blue-100 text-blue-700 border-blue-300', group: 'active' },
@@ -356,7 +365,6 @@ export default function App() {
     setTimeout(() => setToastMsg(''), 3500);
   };
 
-  // Lưu trạng thái đăng nhập vĩnh viễn trên trình duyệt bằng localStorage
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('otb_saved_user') || sessionStorage.getItem('otb_session_user');
@@ -394,7 +402,6 @@ export default function App() {
     selectedDomesticIds: []
   });
 
-  // Form tạo đơn CTV hỗ trợ nhiều section Sản phẩm 1, Link sản phẩm 1 + nút (+ Thêm sản phẩm)
   const [newOrder, setNewOrder] = useState({
     customerName: '',
     customerPhone: '',
@@ -1076,7 +1083,7 @@ export default function App() {
       receiverName: target.customerName,
       receiverPhone: target.customerPhone,
       receiverAddress: target.customerAddress || 'Nhận tại cửa hàng / Địa chỉ đã xác nhận',
-      itemsSummary: `#${target.code} - ${target.productName} x${target.quantity}`,
+      itemsSummary: `#${target.code} - ${target.productName} ${formatOrderQuantityBadge(target.productName, target.quantity)}`,
       note: target.note,
       codAmount: calculatedPrintCod,
       shipFee,
@@ -1409,7 +1416,9 @@ export default function App() {
 
                   <div className="font-bold text-sm text-gray-900 whitespace-pre-line notranslate" translate="no">
                     {matchedOrder.productName}{' '}
-                    <span className="text-orange-600">x{matchedOrder.quantity}</span>
+                    <span className="text-orange-600">
+                      {formatOrderQuantityBadge(matchedOrder.productName, matchedOrder.quantity)}
+                    </span>
                   </div>
 
                   {matchedOrder.postpaidWeight && (
@@ -1470,7 +1479,7 @@ export default function App() {
                         >
                           <div className="flex items-center justify-between">
                             <span className="font-mono font-bold text-gray-900 notranslate" translate="no">
-                              #{oldOrd.code} • {oldOrd.productName} x{oldOrd.quantity}
+                              #{oldOrd.code} • {oldOrd.productName} {formatOrderQuantityBadge(oldOrd.productName, oldOrd.quantity)}
                             </span>
                             <span className="px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 text-[10px] font-bold">
                               Đã trả hàng
@@ -2202,7 +2211,9 @@ export default function App() {
 
                               <h3 className="font-bold text-sm text-gray-900 whitespace-pre-line notranslate" translate="no">
                                 {order.productName}{' '}
-                                <span className="text-orange-600">x{order.quantity}</span>
+                                <span className="text-orange-600 text-xs font-extrabold">
+                                  {formatOrderQuantityBadge(order.productName, order.quantity)}
+                                </span>
                               </h3>
 
                               {order.sizeColor && (
@@ -3570,7 +3581,10 @@ export default function App() {
                               </span>
                             </div>
                             <div className="text-gray-700 truncate notranslate" translate="no">
-                              {ord.productName} x{ord.quantity}
+                              {ord.productName}{' '}
+                              <span className="text-orange-600 font-bold">
+                                {formatOrderQuantityBadge(ord.productName, ord.quantity)}
+                              </span>
                             </div>
                           </div>
 
