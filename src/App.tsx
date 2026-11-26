@@ -330,7 +330,6 @@ const formatVND = (num) => {
   return n.toLocaleString('vi-VN') + ' ₫';
 };
 
-// Hiển thị nhãn số lượng rõ ràng: nếu nhiều món đánh số dòng thì ghi "(Tổng N món)", tránh gây hiểu nhầm ở món cuối
 const formatOrderQuantityBadge = (productName, quantity) => {
   const qty = Number(quantity) || 1;
   const isMultiLineItems = String(productName || '').includes('\n');
@@ -338,6 +337,27 @@ const formatOrderQuantityBadge = (productName, quantity) => {
     return `(Tổng ${qty} món)`;
   }
   return `x${qty}`;
+};
+
+// Hàm kiểm tra đơn thuộc CTV (khớp cả ID lẫn tên CTV để không bao giờ bị lệch giữa các thiết bị)
+const isOrderOwnedByCtv = (order, ctvObj) => {
+  if (!order || !ctvObj) return false;
+  if (order.ctvId && ctvObj.id && order.ctvId === ctvObj.id) return true;
+  if (
+    order.ctvUsername &&
+    ctvObj.username &&
+    String(order.ctvUsername).trim().toLowerCase() === String(ctvObj.username).trim().toLowerCase()
+  ) {
+    return true;
+  }
+  if (
+    order.ctvName &&
+    ctvObj.name &&
+    String(order.ctvName).trim().toLowerCase() === String(ctvObj.name).trim().toLowerCase()
+  ) {
+    return true;
+  }
+  return false;
 };
 
 const ORDER_STATUSES = [
@@ -479,7 +499,13 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser?.role === 'ctv') {
-      const me = appData.ctvs.find((c) => c.id === currentUser.id);
+      const me = appData.ctvs.find(
+        (c) =>
+          c.id === currentUser.id ||
+          (c.username &&
+            currentUser.username &&
+            c.username.toLowerCase() === currentUser.username.toLowerCase())
+      );
       if (me) {
         setBankForm({
           bankName: me.bankName || '',
@@ -790,6 +816,7 @@ export default function App() {
       code: nextOrderCode,
       createdAt: new Date().toISOString().slice(0, 10),
       ctvId: currentUser.id,
+      ctvUsername: currentUser.username || '',
       ctvName: currentUser.name,
       customerName: newOrder.customerName.trim(),
       customerPhone: newOrder.customerPhone.trim(),
@@ -875,7 +902,7 @@ export default function App() {
   const roleOrders = useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.role === 'admin') return appData.orders;
-    return appData.orders.filter((o) => o.ctvId === currentUser.id);
+    return appData.orders.filter((o) => isOrderOwnedByCtv(o, currentUser));
   }, [appData.orders, currentUser]);
 
   const activeCount = useMemo(
@@ -900,8 +927,9 @@ export default function App() {
     return roleOrders.filter((o) => {
       const stObj = ORDER_STATUSES.find((s) => s.id === o.status) || ORDER_STATUSES[0];
       if (stObj.group !== orderSubTab) return false;
-      if (currentUser?.role === 'admin' && filterCtv !== 'all' && o.ctvId !== filterCtv) {
-        return false;
+      if (currentUser?.role === 'admin' && filterCtv !== 'all') {
+        const targetCtvObj = appData.ctvs.find((c) => c.id === filterCtv);
+        if (targetCtvObj && !isOrderOwnedByCtv(o, targetCtvObj)) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -910,7 +938,7 @@ export default function App() {
       }
       return true;
     });
-  }, [roleOrders, orderSubTab, currentUser, filterCtv, searchQuery]);
+  }, [roleOrders, orderSubTab, currentUser, filterCtv, appData.ctvs, searchQuery]);
 
   const availableCnTrackings = useMemo(() => {
     const map = {};
@@ -1181,7 +1209,10 @@ export default function App() {
     e.preventDefault();
     if (!currentUser || currentUser.role !== 'ctv') return;
     const updatedCtvs = appData.ctvs.map((c) =>
-      c.id === currentUser.id
+      c.id === currentUser.id ||
+      (c.username &&
+        currentUser.username &&
+        c.username.toLowerCase() === currentUser.username.toLowerCase())
         ? {
             ...c,
             bankName: bankForm.bankName.trim(),
@@ -1854,7 +1885,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Danh sách từng khối Sản phẩm 1, Link sản phẩm 1 + Nút (+ Thêm sản phẩm) */}
                   <div className="space-y-3">
                     {(newOrder.items || []).map((item, idx) => (
                       <div
@@ -2818,7 +2848,7 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {appData.ctvs.map((ctv) => {
                 const ctvOrders = appData.orders.filter(
-                  (o) => o.ctvId === ctv.id && o.status !== 'cancelled'
+                  (o) => isOrderOwnedByCtv(o, ctv) && o.status !== 'cancelled'
                 );
                 const totalComm = ctvOrders.reduce(
                   (s, o) => s + (Number(o.commissionVnd) || 0),
@@ -3060,7 +3090,7 @@ export default function App() {
 
             {(() => {
               const myOrders = appData.orders.filter(
-                (o) => o.ctvId === currentUser.id && o.status !== 'cancelled'
+                (o) => isOrderOwnedByCtv(o, currentUser) && o.status !== 'cancelled'
               );
               const totalComm = myOrders.reduce(
                 (s, o) => s + (Number(o.commissionVnd) || 0),
