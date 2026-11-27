@@ -35,7 +35,9 @@ import {
   CheckSquare,
   SlidersHorizontal,
   Link as LinkIcon,
-  Box
+  Box,
+  ShoppingBag,
+  Download
 } from 'lucide-react';
 
 const firebaseConfig = {
@@ -80,7 +82,8 @@ const INITIAL_DATA = {
   orders: [],
   taobaoOrders: [],
   batches: [],
-  shipments: []
+  shipments: [],
+  readyStock: []
 };
 
 const CODE128_PATTERNS = [
@@ -235,6 +238,30 @@ const uploadImageSmart = async (file, maxWidth = 800, quality = 0.78) => {
     };
     reader.readAsDataURL(file);
   });
+};
+
+const downloadSharpImage = async (imageUrl, filename = 'san_pham.jpg') => {
+  if (!imageUrl) return;
+  try {
+    const response = await fetch(imageUrl);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+  } catch (err) {
+    const link = document.createElement('a');
+    link.href = imageUrl;
+    link.download = filename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 };
 
 const recompressBase64 = (base64Str, maxWidth = 280, quality = 0.35) => {
@@ -427,6 +454,35 @@ export default function App() {
   const [deleteCtvTarget, setDeleteCtvTarget] = useState(null);
   const [deleteBatchTarget, setDeleteBatchTarget] = useState(null);
 
+  // Ready Stock (Hàng Sẵn) States
+  const [readyStockSearch, setReadyStockSearch] = useState('');
+  const [readyStockForm, setReadyStockForm] = useState({
+    name: '',
+    description: '',
+    quantity: '1',
+    costPriceVnd: '',
+    adminSalePriceVnd: '',
+    images: []
+  });
+  const [isUploadingReadyImages, setIsUploadingReadyImages] = useState(false);
+  const [editReadyItemModal, setEditReadyItemModal] = useState(null);
+  const [deleteReadyItemTarget, setDeleteReadyItemTarget] = useState(null);
+
+  // CTV Chốt Đơn Hàng Sẵn Modal
+  const [closeReadyModal, setCloseReadyModal] = useState(null);
+  const [closeReadyForm, setCloseReadyForm] = useState({
+    customerName: '',
+    customerPhone: '',
+    customerAddress: '',
+    quantity: 1,
+    commissionVnd: '',
+    paymentType: 'cod', // 'cod' | 'deposit' | 'full'
+    depositAmount: '',
+    billImage: '',
+    note: ''
+  });
+  const [isUploadingReadyBill, setIsUploadingReadyBill] = useState(false);
+
   const [taobaoForm, setTaobaoForm] = useState({
     cnTracking: '',
     productName: '',
@@ -502,6 +558,7 @@ export default function App() {
   const [payoutBillBase64, setPayoutBillBase64] = useState('');
 
   const [taxMonthFilter, setTaxMonthFilter] = useState('all');
+  const [excludePersonalOrders, setExcludePersonalOrders] = useState(true);
 
   const [bankForm, setBankForm] = useState({
     bankName: '',
@@ -550,7 +607,8 @@ export default function App() {
             orders: cleaned,
             taobaoOrders: Array.isArray(data.taobaoOrders) ? data.taobaoOrders : [],
             batches: Array.isArray(data.batches) ? data.batches : [],
-            shipments: Array.isArray(data.shipments) ? data.shipments : []
+            shipments: Array.isArray(data.shipments) ? data.shipments : [],
+            readyStock: Array.isArray(data.readyStock) ? data.readyStock : []
           };
 
           setAppData(nextState);
@@ -844,6 +902,7 @@ export default function App() {
       commissionPaid: false,
       commissionBillImage: '',
       costCny: 0,
+      directCostVnd: 0,
       cnTracking: '',
       batchId: '',
       vnShippingCostVnd: 0,
@@ -884,6 +943,212 @@ export default function App() {
       showToast(`Đã tạo thành công đơn hàng #${created.code}!`);
     }
   };
+
+  // --- HÀNG SẴN HANDLERS ---
+  const handleUploadReadyStockImages = async (e) => {
+    const files = Array.from(e.target.files || []).slice(0, 4);
+    if (files.length === 0) return;
+    setIsUploadingReadyImages(true);
+    try {
+      // Upload với maxWidth=1600, quality=0.92 để giữ nguyên độ nét cao nhất cho CTV tải về
+      const uploaded = await Promise.all(files.map((f) => uploadImageSmart(f, 1600, 0.92)));
+      setReadyStockForm((prev) => ({
+        ...prev,
+        images: [...(prev.images || []), ...uploaded].slice(0, 4)
+      }));
+    } finally {
+      setIsUploadingReadyImages(false);
+    }
+  };
+
+  const handleCreateReadyStockItem = async (e) => {
+    e.preventDefault();
+    if (!readyStockForm.name.trim()) {
+      showToast('Vui lòng nhập tên món hàng sẵn!');
+      return;
+    }
+
+    const newItem = {
+      id: 'rs_' + Date.now(),
+      name: readyStockForm.name.trim(),
+      description: readyStockForm.description.trim(),
+      quantity: Math.max(0, Number(readyStockForm.quantity) || 1),
+      costPriceVnd: Math.max(0, Number(readyStockForm.costPriceVnd) || 0),
+      adminSalePriceVnd: Math.max(0, Number(readyStockForm.adminSalePriceVnd) || 0),
+      images: readyStockForm.images || [],
+      createdAt: new Date().toISOString().slice(0, 10)
+    };
+
+    const ok = await updateAppData({
+      ...appData,
+      readyStock: [newItem, ...(appData.readyStock || [])]
+    });
+
+    if (ok) {
+      setReadyStockForm({
+        name: '',
+        description: '',
+        quantity: '1',
+        costPriceVnd: '',
+        adminSalePriceVnd: '',
+        images: []
+      });
+      showToast(`Đã thêm "${newItem.name}" vào Kho Hàng Sẵn!`);
+    }
+  };
+
+  const handleSaveEditReadyItem = () => {
+    if (!editReadyItemModal) return;
+    const updatedList = (appData.readyStock || []).map((item) =>
+      item.id === editReadyItemModal.id
+        ? {
+            ...editReadyItemModal,
+            quantity: Math.max(0, Number(editReadyItemModal.quantity) || 0),
+            costPriceVnd: Math.max(0, Number(editReadyItemModal.costPriceVnd) || 0),
+            adminSalePriceVnd: Math.max(0, Number(editReadyItemModal.adminSalePriceVnd) || 0)
+          }
+        : item
+    );
+    updateAppData({ ...appData, readyStock: updatedList });
+    setEditReadyItemModal(null);
+    showToast('Đã cập nhật thông tin hàng sẵn!');
+  };
+
+  const confirmDeleteReadyItem = () => {
+    if (!deleteReadyItemTarget) return;
+    updateAppData({
+      ...appData,
+      readyStock: (appData.readyStock || []).filter((i) => i.id !== deleteReadyItemTarget.id)
+    });
+    setDeleteReadyItemTarget(null);
+    showToast('Đã xóa sản phẩm khỏi Kho Hàng Sẵn!');
+  };
+
+  const openCloseReadyOrderModal = (item) => {
+    setCloseReadyModal(item);
+    setCloseReadyForm({
+      customerName: '',
+      customerPhone: '',
+      customerAddress: '',
+      quantity: 1,
+      commissionVnd: '',
+      paymentType: 'cod',
+      depositAmount: '',
+      billImage: '',
+      note: ''
+    });
+  };
+
+  const handleUploadReadyOrderBill = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingReadyBill(true);
+    try {
+      const url = await uploadImageSmart(file);
+      setCloseReadyForm((prev) => ({ ...prev, billImage: url }));
+    } finally {
+      setIsUploadingReadyBill(false);
+    }
+  };
+
+  const handleConfirmCloseReadyOrder = async (e) => {
+    e.preventDefault();
+    if (!closeReadyModal || !currentUser) return;
+
+    const qty = Math.min(
+      Math.max(1, Number(closeReadyForm.quantity) || 1),
+      Math.max(1, Number(closeReadyModal.quantity) || 1)
+    );
+    const adminBaseTotal = (Number(closeReadyModal.adminSalePriceVnd) || 0) * qty;
+    const costBaseTotal = (Number(closeReadyModal.costPriceVnd) || 0) * qty;
+    const comm = Math.max(0, Number(closeReadyForm.commissionVnd) || 0);
+    const totalCustomerPrice = adminBaseTotal + comm;
+
+    let paidNow = 0;
+    let paymentLabel = 'COD 100%';
+    if (closeReadyForm.paymentType === 'full') {
+      paidNow = totalCustomerPrice;
+      paymentLabel = 'Bank full 100%';
+    } else if (closeReadyForm.paymentType === 'deposit') {
+      paidNow = Math.min(totalCustomerPrice, Math.max(0, Number(closeReadyForm.depositAmount) || 0));
+      paymentLabel = `Khách cọc ${formatVND(paidNow)}`;
+    }
+
+    const codRemaining = Math.max(0, totalCustomerPrice - paidNow);
+    const fullProductLabel = closeReadyModal.description
+      ? `[Hàng sẵn] ${closeReadyModal.name} (${closeReadyModal.description})`
+      : `[Hàng sẵn] ${closeReadyModal.name}`;
+
+    const combinedNote = [
+      `Hàng sẵn (${paymentLabel})`,
+      closeReadyForm.note.trim()
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const createdOrder = {
+      id: 'ord_' + Date.now(),
+      code: nextOrderCode,
+      createdAt: new Date().toISOString().slice(0, 10),
+      ctvId: currentUser.id,
+      ctvUsername: currentUser.username || '',
+      ctvName: currentUser.name,
+      customerName: closeReadyForm.customerName.trim(),
+      customerPhone: closeReadyForm.customerPhone.trim(),
+      customerAddress: closeReadyForm.customerAddress.trim(),
+      productName: fullProductLabel,
+      sizeColor: 'Hàng sẵn tại kho',
+      quantity: qty,
+      salePriceVnd: totalCustomerPrice,
+      depositVnd: paidNow,
+      codVnd: codRemaining,
+      commissionVnd: comm,
+      commissionPaid: false,
+      commissionBillImage: '',
+      costCny: 0,
+      directCostVnd: costBaseTotal,
+      cnTracking: '',
+      batchId: '',
+      vnShippingCostVnd: 0,
+      postpaidWeight: false,
+      spxTracking: '',
+      shippingPayer: 'customer',
+      shopShipFeeVnd: 0,
+      packedDone: false,
+      status: 'arrived_vn',
+      completedAt: null,
+      note: combinedNote,
+      productImages: closeReadyModal.images || [],
+      depositBillImage: closeReadyForm.billImage || '',
+      extraPaymentBillImage: ''
+    };
+
+    const updatedReadyStock = (appData.readyStock || []).map((item) =>
+      item.id === closeReadyModal.id
+        ? { ...item, quantity: Math.max(0, (Number(item.quantity) || 0) - qty) }
+        : item
+    );
+
+    const ok = await updateAppData({
+      ...appData,
+      orders: [createdOrder, ...appData.orders],
+      readyStock: updatedReadyStock
+    });
+
+    if (ok) {
+      setCloseReadyModal(null);
+      setActiveTab('orders');
+      setOrderSubTab('active');
+      showToast(`Đã chốt đơn hàng sẵn #${createdOrder.code} & trừ tồn kho!`);
+    }
+  };
+
+  const filteredReadyStock = useMemo(() => {
+    const list = appData.readyStock || [];
+    if (!readyStockSearch.trim()) return list;
+    const q = readyStockSearch.toLowerCase();
+    return list.filter((i) => `${i.name} ${i.description}`.toLowerCase().includes(q));
+  }, [appData.readyStock, readyStockSearch]);
 
   const updateOrderField = (orderId, patch) => {
     const updatedOrders = appData.orders.map((o) => {
@@ -1167,7 +1432,6 @@ export default function App() {
     return appData.orders.filter((o) => ['arrived_vn', 'keep'].includes(o.status));
   }, [appData.orders]);
 
-  // Danh sách các đơn đã tạo MVĐ trả khách nhưng đang chờ gói hàng & bàn giao
   const pendingPackingOrders = useMemo(() => {
     return appData.orders.filter(
       (o) =>
@@ -1341,9 +1605,12 @@ export default function App() {
       if (taxMonthFilter !== 'all' && !String(o.createdAt || '').startsWith(taxMonthFilter)) {
         return false;
       }
+      if (excludePersonalOrders && (Number(o.salePriceVnd) || 0) === 0) {
+        return false;
+      }
       return true;
     });
-  }, [appData.orders, taxMonthFilter]);
+  }, [appData.orders, taxMonthFilter, excludePersonalOrders]);
 
   const financialSummary = useMemo(() => {
     const rate = Number(appData.exchangeRate) || 3550;
@@ -1352,7 +1619,8 @@ export default function App() {
 
     validFinancialOrders.forEach((o) => {
       const rev = Number(o.salePriceVnd) || 0;
-      const goodsCost = Math.round((Number(o.costCny) || 0) * rate);
+      const goodsCost =
+        (Number(o.directCostVnd) || 0) + Math.round((Number(o.costCny) || 0) * rate);
       const batchShip = Number(o.vnShippingCostVnd) || 0;
       const shopShip = Number(o.shopShipFeeVnd) || 0;
       totalRevenue += rev;
@@ -1379,6 +1647,7 @@ export default function App() {
     const rows = validFinancialOrders.map((o) => {
       const rev = Number(o.salePriceVnd) || 0;
       const cost =
+        (Number(o.directCostVnd) || 0) +
         Math.round((Number(o.costCny) || 0) * rate) +
         (Number(o.vnShippingCostVnd) || 0) +
         (Number(o.shopShipFeeVnd) || 0);
@@ -1650,6 +1919,10 @@ export default function App() {
     );
   }
 
+  const readyStockAvailableCount = (appData.readyStock || []).filter(
+    (i) => (Number(i.quantity) || 0) > 0
+  ).length;
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 pb-14">
       <style>{`
@@ -1741,6 +2014,23 @@ export default function App() {
             1. Đơn Hàng & Theo Dõi
           </button>
 
+          <button
+            onClick={() => setActiveTab('ready_stock')}
+            className={`px-4 py-2.5 text-xs sm:text-sm font-bold whitespace-nowrap border-b-2 transition flex items-center gap-1.5 ${
+              activeTab === 'ready_stock'
+                ? 'border-orange-600 text-orange-600'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>Hàng Sẵn</span>
+            {readyStockAvailableCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold">
+                {readyStockAvailableCount}
+              </span>
+            )}
+          </button>
+
           {currentUser.role === 'ctv' && (
             <button
               onClick={() => setActiveTab('ctv_income')}
@@ -1751,7 +2041,7 @@ export default function App() {
               }`}
             >
               <CreditCard className="w-4 h-4" />
-              2. Nhận Lương & Ngân Hàng
+              Nhận Lương & Ngân Hàng
             </button>
           )}
 
@@ -2354,7 +2644,7 @@ export default function App() {
                                   alt="Bill cọc"
                                   onClick={() => setPreviewImage(order.depositBillImage)}
                                   className="w-14 h-14 rounded-xl object-cover border-2 border-emerald-400 cursor-pointer hover:opacity-90"
-                                  title="Xem ảnh bill cọc"
+                                  title="Xem ảnh bill cọc / thanh toán"
                                 />
                               )}
                               {order.extraPaymentBillImage && (
@@ -2436,7 +2726,7 @@ export default function App() {
                           <div className="flex flex-col sm:items-end justify-between gap-2 border-t sm:border-t-0 pt-2 sm:pt-0">
                             <div className="text-left sm:text-right text-xs space-y-0.5">
                               <div>
-                                Bán: <strong className="text-gray-900">{formatVND(order.salePriceVnd)}</strong> • Cọc:{' '}
+                                Bán: <strong className="text-gray-900">{formatVND(order.salePriceVnd)}</strong> • Đã TT:{' '}
                                 <strong className="text-emerald-700">{formatVND(order.depositVnd)}</strong>
                               </div>
                               <div>
@@ -2507,6 +2797,358 @@ export default function App() {
               </div>
             </div>
           </>
+        )}
+
+        {/* TAB HÀNG SẴN */}
+        {activeTab === 'ready_stock' && (
+          <div className="space-y-6">
+            {currentUser.role === 'admin' && (
+              <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5">
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <ShoppingBag className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="font-bold text-sm sm:text-base text-gray-900">
+                        Thêm Sản Phẩm Vào Kho Hàng Sẵn
+                      </h2>
+                      <p className="text-[11px] text-gray-500">
+                        Hàng dư, khách hủy hoặc nhập sẵn — CTV chỉ thấy Giá bán Admin & có thể tải ảnh gốc nét về đăng bán
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <form onSubmit={handleCreateReadyStockItem} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <div className="lg:col-span-2">
+                      <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                        Tên sản phẩm sẵn *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={readyStockForm.name}
+                        onChange={(e) => setReadyStockForm({ ...readyStockForm, name: e.target.value })}
+                        placeholder="VD: Váy trễ vai nơ trắng..."
+                        className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs notranslate"
+                        translate="no"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                        Size / Màu / Tình trạng
+                      </label>
+                      <input
+                        type="text"
+                        value={readyStockForm.description}
+                        onChange={(e) =>
+                          setReadyStockForm({ ...readyStockForm, description: e.target.value })
+                        }
+                        placeholder="VD: Size S, new tag..."
+                        className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs notranslate"
+                        translate="no"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-600 uppercase mb-1">
+                        Số lượng sẵn *
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={readyStockForm.quantity}
+                        onChange={(e) =>
+                          setReadyStockForm({ ...readyStockForm, quantity: e.target.value })
+                        }
+                        className="w-full px-3 py-2 rounded-xl border border-gray-300 text-xs font-bold"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-purple-700 uppercase mb-1">
+                          Giá vốn (₫)
+                        </label>
+                        <input
+                          type="number"
+                          value={readyStockForm.costPriceVnd}
+                          onChange={(e) =>
+                            setReadyStockForm({ ...readyStockForm, costPriceVnd: e.target.value })
+                          }
+                          placeholder="150000"
+                          className="w-full px-2.5 py-2 rounded-xl border border-purple-300 bg-purple-50/40 text-xs font-bold text-purple-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-orange-700 uppercase mb-1">
+                          Giá bán (₫) *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          value={readyStockForm.adminSalePriceVnd}
+                          onChange={(e) =>
+                            setReadyStockForm({
+                              ...readyStockForm,
+                              adminSalePriceVnd: e.target.value
+                            })
+                          }
+                          placeholder="220000"
+                          className="w-full px-2.5 py-2 rounded-xl border border-orange-300 bg-orange-50/40 text-xs font-bold text-orange-800"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-2 border-dashed border-gray-300 rounded-2xl p-3 text-center bg-gray-50">
+                    <label className="cursor-pointer block">
+                      <Upload className="mx-auto text-gray-400 mb-1 w-5 h-5" />
+                      <span className="text-xs font-semibold text-gray-700">
+                        {isUploadingReadyImages
+                          ? 'Đang tải ảnh chất lượng cao lên kho 25GB...'
+                          : 'Upload ảnh chụp thật sản phẩm (Tối đa 4 ảnh - giữ nguyên độ nét gốc)'}
+                      </span>
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        disabled={isUploadingReadyImages}
+                        onChange={handleUploadReadyStockImages}
+                        className="hidden"
+                      />
+                    </label>
+                    {readyStockForm.images && readyStockForm.images.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2.5 justify-center">
+                        {readyStockForm.images.map((img, idx) => (
+                          <div
+                            key={idx}
+                            className="relative w-16 h-16 rounded-xl overflow-hidden border border-gray-300"
+                          >
+                            <img
+                              src={img}
+                              alt="Hàng sẵn"
+                              onClick={() => setPreviewImage(img)}
+                              className="w-full h-full object-cover cursor-pointer"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setReadyStockForm((prev) => ({
+                                  ...prev,
+                                  images: prev.images.filter((_, i) => i !== idx)
+                                }))
+                              }
+                              className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 text-white flex items-center justify-center text-[10px]"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isUploadingReadyImages}
+                      className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs shadow flex items-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" /> Lưu Vào Kho Hàng Sẵn
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                <div>
+                  <h2 className="font-bold text-sm sm:text-base text-gray-900">
+                    Danh Sách Hàng Sẵn Tại Kho ({filteredReadyStock.length} mẫu)
+                  </h2>
+                  <p className="text-[11px] text-gray-500">
+                    {currentUser.role === 'admin'
+                      ? 'Quản lý tồn kho hàng sẵn, giá vốn và giá bán giao CTV'
+                      : 'CTV có thể tải ảnh mẫu nét về đăng bài và bấm "Chốt đơn" (tự nhập hoa hồng)'}
+                  </p>
+                </div>
+
+                <div className="relative sm:w-64">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={readyStockSearch}
+                    onChange={(e) => setReadyStockSearch(e.target.value)}
+                    placeholder="Tìm tên món, size, màu..."
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-gray-300 text-xs"
+                  />
+                </div>
+              </div>
+
+              {filteredReadyStock.length === 0 ? (
+                <div className="p-10 text-center text-xs text-gray-400">
+                  Hiện chưa có sản phẩm nào trong Kho Hàng Sẵn.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredReadyStock.map((item) => {
+                    const qty = Number(item.quantity) || 0;
+                    const isSoldOut = qty <= 0;
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-3xl border p-4 flex flex-col justify-between gap-3 transition ${
+                          isSoldOut
+                            ? 'bg-gray-50 border-gray-200 opacity-75'
+                            : 'bg-white border-gray-200 hover:border-orange-300 shadow-sm'
+                        }`}
+                      >
+                        <div className="space-y-3">
+                          {/* Khung ảnh sản phẩm */}
+                          <div className="relative">
+                            {item.images && item.images.length > 0 ? (
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {item.images.map((img, idx) => (
+                                  <div
+                                    key={idx}
+                                    className={`relative rounded-2xl overflow-hidden border border-gray-200 bg-gray-100 ${
+                                      item.images.length === 1 ? 'col-span-2 h-48' : 'h-28'
+                                    }`}
+                                  >
+                                    <img
+                                      src={img}
+                                      alt={item.name}
+                                      onClick={() => setPreviewImage(img)}
+                                      className="w-full h-full object-cover cursor-pointer hover:scale-105 transition"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        downloadSharpImage(
+                                          img,
+                                          `${item.name.replace(/\s+/g, '_')}_${idx + 1}.jpg`
+                                        )
+                                      }
+                                      className="absolute bottom-1.5 right-1.5 px-2 py-1 rounded-lg bg-black/75 hover:bg-black text-white text-[10px] font-bold flex items-center gap-1 shadow"
+                                    >
+                                      <Download className="w-3 h-3" /> Tải ảnh
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="h-36 rounded-2xl bg-gray-100 border border-gray-200 flex items-center justify-center text-xs text-gray-400">
+                                Chưa có ảnh mẫu
+                              </div>
+                            )}
+
+                            <span
+                              className={`absolute top-2 left-2 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold shadow-sm ${
+                                isSoldOut
+                                  ? 'bg-red-600 text-white'
+                                  : 'bg-emerald-600 text-white'
+                              }`}
+                            >
+                              {isSoldOut ? 'Đã hết hàng' : `Còn sẵn: ${qty}`}
+                            </span>
+                          </div>
+
+                          {/* Tên & mô tả */}
+                          <div className="space-y-1">
+                            <h3 className="font-extrabold text-sm text-gray-900 notranslate" translate="no">
+                              {item.name}
+                            </h3>
+                            {item.description && (
+                              <p className="text-xs text-gray-600 notranslate" translate="no">
+                                {item.description}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Giá */}
+                          <div className="p-2.5 rounded-2xl bg-orange-50/70 border border-orange-200/80 flex items-center justify-between text-xs">
+                            {currentUser.role === 'admin' && (
+                              <div>
+                                <div className="text-[10px] text-purple-700 font-semibold">
+                                  Giá vốn:
+                                </div>
+                                <div className="font-extrabold text-purple-800">
+                                  {formatVND(item.costPriceVnd)}
+                                </div>
+                              </div>
+                            )}
+                            <div className={currentUser.role === 'admin' ? 'text-right' : ''}>
+                              <div className="text-[10px] text-orange-700 font-semibold">
+                                Giá bán Admin:
+                              </div>
+                              <div className="font-extrabold text-orange-600 text-sm">
+                                {formatVND(item.adminSalePriceVnd)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Nút hành động */}
+                        <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-2">
+                          {currentUser.role === 'ctv' ? (
+                            <>
+                              {item.images && item.images.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    downloadSharpImage(
+                                      item.images[0],
+                                      `${item.name.replace(/\s+/g, '_')}.jpg`
+                                    )
+                                  }
+                                  className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-xs flex items-center gap-1.5"
+                                >
+                                  <Download className="w-3.5 h-3.5" /> Tải ảnh
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                disabled={isSoldOut}
+                                onClick={() => openCloseReadyOrderModal(item)}
+                                className="flex-1 py-2 px-4 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:bg-gray-300 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5"
+                              >
+                                <ShoppingBag className="w-3.5 h-3.5" />
+                                {isSoldOut ? 'Hết hàng' : 'Chốt đơn'}
+                              </button>
+                            </>
+                          ) : (
+                            <div className="w-full flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setEditReadyItemModal({ ...item })}
+                                className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" /> Sửa
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteReadyItemTarget(item)}
+                                className="px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" /> Xóa
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {activeTab === 'batches' && currentUser.role === 'admin' && (
@@ -2946,7 +3588,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Danh sách kiểm đếm gói hàng sau khi in tem */}
             <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2 bg-indigo-50/40">
                 <div className="flex items-center gap-2">
@@ -3201,13 +3842,22 @@ export default function App() {
         {activeTab === 'finance' && currentUser.role === 'admin' && (
           <div className="space-y-5">
             <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div className="space-y-1">
                 <h2 className="font-bold text-base text-gray-900">
                   Báo Cáo Doanh Thu, Lãi Thực Tế & Kê Khai Thuế
                 </h2>
                 <p className="text-xs text-gray-500">
-                  Loại trừ các đơn đã hủy/hoàn. Doanh thu tính theo tổng tiền khách trả (không ghi riêng phần CTV).
+                  Loại trừ các đơn đã hủy/hoàn. Tính cả đơn order Taobao và đơn Hàng Sẵn.
                 </p>
+                <label className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer pt-1">
+                  <input
+                    type="checkbox"
+                    checked={excludePersonalOrders}
+                    onChange={(e) => setExcludePersonalOrders(e.target.checked)}
+                    className="rounded text-orange-600"
+                  />
+                  <span>Tự động bỏ qua các đơn mua cá nhân (Doanh thu = 0 ₫)</span>
+                </label>
               </div>
 
               <div className="flex items-center gap-2">
@@ -3418,6 +4068,376 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* MODAL CTV CHỐT ĐƠN HÀNG SẴN */}
+      {closeReadyModal && (() => {
+        const maxAvail = Math.max(1, Number(closeReadyModal.quantity) || 1);
+        const qty = Math.min(Math.max(1, Number(closeReadyForm.quantity) || 1), maxAvail);
+        const adminBaseTotal = (Number(closeReadyModal.adminSalePriceVnd) || 0) * qty;
+        const comm = Math.max(0, Number(closeReadyForm.commissionVnd) || 0);
+        const totalCustomerPrice = adminBaseTotal + comm;
+
+        let paidNow = 0;
+        if (closeReadyForm.paymentType === 'full') {
+          paidNow = totalCustomerPrice;
+        } else if (closeReadyForm.paymentType === 'deposit') {
+          paidNow = Math.min(totalCustomerPrice, Math.max(0, Number(closeReadyForm.depositAmount) || 0));
+        }
+        const codRemaining = Math.max(0, totalCustomerPrice - paidNow);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl my-8">
+              <div className="flex items-center justify-between border-b pb-3">
+                <div>
+                  <h3 className="font-bold text-base text-gray-900">
+                    Chốt Đơn Hàng Sẵn — #{nextOrderCode}
+                  </h3>
+                  <p className="text-[11px] text-gray-500 truncate max-w-[280px]">
+                    {closeReadyModal.name} {closeReadyModal.description ? `(${closeReadyModal.description})` : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCloseReadyModal(null)}
+                  className="p-1 text-gray-400 hover:text-gray-700"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmCloseReadyOrder} className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">Tên khách hàng *</label>
+                    <input
+                      type="text"
+                      required
+                      value={closeReadyForm.customerName}
+                      onChange={(e) =>
+                        setCloseReadyForm({ ...closeReadyForm, customerName: e.target.value })
+                      }
+                      placeholder="VD: Minh Anh"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">SĐT nhận hàng *</label>
+                    <input
+                      type="tel"
+                      required
+                      value={closeReadyForm.customerPhone}
+                      onChange={(e) =>
+                        setCloseReadyForm({ ...closeReadyForm, customerPhone: e.target.value })
+                      }
+                      placeholder="09xx..."
+                      className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Địa chỉ giao hàng *</label>
+                  <input
+                    type="text"
+                    required
+                    value={closeReadyForm.customerAddress}
+                    onChange={(e) =>
+                      setCloseReadyForm({ ...closeReadyForm, customerAddress: e.target.value })
+                    }
+                    placeholder="Số nhà, tên đường, phường/xã..."
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 bg-orange-50/70 p-3 rounded-2xl border border-orange-200">
+                  <div>
+                    <label className="block font-bold text-gray-700 mb-1">
+                      Số lượng (Còn {maxAvail}):
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max={maxAvail}
+                      required
+                      value={closeReadyForm.quantity}
+                      onChange={(e) =>
+                        setCloseReadyForm({ ...closeReadyForm, quantity: e.target.value })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-gray-300 bg-white font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-purple-700 mb-1">
+                      Hoa hồng CTV tự nhập (₫) *
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={closeReadyForm.commissionVnd}
+                      onChange={(e) =>
+                        setCloseReadyForm({ ...closeReadyForm, commissionVnd: e.target.value })
+                      }
+                      placeholder="VD: 30000"
+                      className="w-full px-3 py-2 rounded-xl border border-purple-300 bg-white font-bold text-purple-800"
+                    />
+                  </div>
+
+                  <div className="col-span-2 pt-2 border-t border-orange-200/80 flex items-center justify-between">
+                    <span className="text-gray-600">
+                      Giá gốc Admin: <strong>{formatVND(adminBaseTotal)}</strong>
+                    </span>
+                    <span className="text-sm font-black text-orange-600">
+                      Giá khách mua: {formatVND(totalCustomerPrice)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Hình thức thanh toán: COD / Cọc / Bank full */}
+                <div className="p-3 rounded-2xl bg-blue-50/60 border border-blue-200 space-y-2.5">
+                  <label className="block font-extrabold text-blue-900 uppercase text-[11px]">
+                    Hình thức khách thanh toán:
+                  </label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: 'cod', label: 'Khách COD' },
+                      { id: 'deposit', label: 'Khách Cọc' },
+                      { id: 'full', label: 'Bank Full' }
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() =>
+                          setCloseReadyForm({ ...closeReadyForm, paymentType: opt.id })
+                        }
+                        className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition ${
+                          closeReadyForm.paymentType === opt.id
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-blue-50'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {closeReadyForm.paymentType === 'deposit' && (
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">
+                        Số tiền khách đã cọc (VNĐ) *:
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min="1"
+                        max={totalCustomerPrice}
+                        value={closeReadyForm.depositAmount}
+                        onChange={(e) =>
+                          setCloseReadyForm({ ...closeReadyForm, depositAmount: e.target.value })
+                        }
+                        placeholder="VD: 100000"
+                        className="w-full px-3 py-2 rounded-xl border border-blue-300 bg-white font-bold text-emerald-700"
+                      />
+                    </div>
+                  )}
+
+                  {closeReadyForm.paymentType !== 'cod' && (
+                    <div>
+                      <label className="block font-bold text-gray-700 mb-1">
+                        Tải ảnh bill chuyển khoản:
+                      </label>
+                      <label className="flex flex-col items-center justify-center h-24 border-2 border-dashed border-blue-300 rounded-2xl cursor-pointer bg-white hover:bg-blue-50/50 transition overflow-hidden">
+                        {isUploadingReadyBill ? (
+                          <span className="text-[11px] font-bold text-blue-600">
+                            Đang tải ảnh bill...
+                          </span>
+                        ) : closeReadyForm.billImage ? (
+                          <img
+                            src={closeReadyForm.billImage}
+                            alt="Bill"
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center text-blue-600 text-[11px]">
+                            <Upload className="w-4 h-4 mb-1" />
+                            <span className="font-semibold">Chọn ảnh bill khách chuyển khoản</span>
+                          </div>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleUploadReadyOrderBill}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1 text-[11px] font-bold">
+                    <span className="text-emerald-700">Đã thanh toán: {formatVND(paidNow)}</span>
+                    <span className="text-orange-600">Thu COD còn lại: {formatVND(codRemaining)}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Ghi chú giao hàng</label>
+                  <input
+                    type="text"
+                    value={closeReadyForm.note}
+                    onChange={(e) => setCloseReadyForm({ ...closeReadyForm, note: e.target.value })}
+                    placeholder="Ghi chú thêm cho Admin..."
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setCloseReadyModal(null)}
+                    className="px-4 py-2 rounded-xl border text-xs font-bold"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isUploadingReadyBill}
+                    className="px-5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-bold text-xs shadow"
+                  >
+                    Xác Nhận Chốt Đơn
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL ADMIN SỬA HÀNG SẴN */}
+      {editReadyItemModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-base text-gray-900">Chỉnh Sửa Hàng Sẵn</h3>
+              <button
+                onClick={() => setEditReadyItemModal(null)}
+                className="p-1 text-gray-400 hover:text-gray-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">Tên sản phẩm</label>
+                <input
+                  type="text"
+                  value={editReadyItemModal.name}
+                  onChange={(e) =>
+                    setEditReadyItemModal({ ...editReadyItemModal, name: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-gray-700 mb-1">Size / Màu / Tình trạng</label>
+                <input
+                  type="text"
+                  value={editReadyItemModal.description}
+                  onChange={(e) =>
+                    setEditReadyItemModal({ ...editReadyItemModal, description: e.target.value })
+                  }
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block font-bold text-gray-700 mb-1">Số lượng tồn</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editReadyItemModal.quantity}
+                    onChange={(e) =>
+                      setEditReadyItemModal({ ...editReadyItemModal, quantity: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-gray-300 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-purple-700 mb-1">Giá vốn (₫)</label>
+                  <input
+                    type="number"
+                    value={editReadyItemModal.costPriceVnd}
+                    onChange={(e) =>
+                      setEditReadyItemModal({ ...editReadyItemModal, costPriceVnd: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-purple-300 font-bold text-purple-800"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-orange-700 mb-1">Giá bán (₫)</label>
+                  <input
+                    type="number"
+                    value={editReadyItemModal.adminSalePriceVnd}
+                    onChange={(e) =>
+                      setEditReadyItemModal({
+                        ...editReadyItemModal,
+                        adminSalePriceVnd: e.target.value
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-orange-300 font-bold text-orange-800"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setEditReadyItemModal(null)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleSaveEditReadyItem}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
+              >
+                Lưu Thay Đổi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteReadyItemTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="font-bold text-base text-gray-900">
+              Xóa "{deleteReadyItemTarget.name}" khỏi Kho Hàng Sẵn?
+            </h3>
+            <p className="text-xs text-gray-500">
+              Các đơn hàng đã chốt trước đó từ món này vẫn được giữ nguyên lịch sử.
+            </p>
+            <div className="flex justify-center gap-2 pt-2">
+              <button
+                onClick={() => setDeleteReadyItemTarget(null)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={confirmDeleteReadyItem}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs"
+              >
+                Xác Nhận Xóa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {shippingModalOrder && (() => {
         const currentRemaining = Number(shippingModalOrder.codVnd) || 0;
@@ -4162,4 +5182,3 @@ export default function App() {
     </div>
   );
 }
-
